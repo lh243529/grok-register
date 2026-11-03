@@ -364,7 +364,7 @@ def click_email_signup_button(timeout=10, log_callback=None, cancel_callback=Non
         if log_callback:
             log_callback("[Debug] 尝试查找“使用邮箱注册”按钮...")
 
-        clicked = _run_pre_submit_js(r"""
+        button = _run_pre_submit_js(r"""
 function isVisible(node) {
     if (!node) return false;
     const style = window.getComputedStyle(node);
@@ -400,14 +400,16 @@ const target = candidates[0]?.node || null;
 if (!target) {
     return false;
 }
-target.click();
-return candidates[0].text || true;
+return target;
         """)
 
-        if clicked:
+        if button:
+            raise_if_cancelled(cancel_callback)
+            button.hover()
+            raise_if_cancelled(cancel_callback)
+            button.click()
             if log_callback:
-                detail = f": {clicked}" if isinstance(clicked, str) else ""
-                log_callback(f"[*] 已点击「使用邮箱注册」按钮{detail}")
+                log_callback("[*] 已点击「使用邮箱注册」按钮")
             sleep_with_cancel(2, cancel_callback)
             _raise_if_email_signup_unavailable()
             return True
@@ -499,7 +501,10 @@ def open_signup_page(log_callback=None, cancel_callback=None):
                 f"注册页导航暂时失败（代理回退）: {exc}"
             ) from exc
 
-    sleep_with_cancel(2, cancel_callback)
+    # DOM loading can finish before the signup controls have rendered.
+    raise_if_cancelled(cancel_callback)
+    time.sleep(4)
+    raise_if_cancelled(cancel_callback)
     if log_callback:
         log_callback(f"[*] 当前URL: {page.url}")
     click_email_signup_button(

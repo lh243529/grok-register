@@ -35,7 +35,7 @@ class EmailSignupRejectionTests(unittest.TestCase):
         page.run_js.side_effect = ["Sign up with email", REJECTION]
         create_mail = Mock()
         with patch.object(registration_browser, "page", page), \
-             patch.object(registration_browser, "_run_pre_submit_js", return_value="Sign up with email"), \
+             patch.object(registration_browser, "_run_pre_submit_js", return_value=Mock()), \
              patch.object(registration_browser, "raise_if_cancelled", return_value=None, create=True), \
              patch.object(registration_browser, "sleep_with_cancel", return_value=None, create=True), \
              patch.object(registration_browser, "get_email_and_token", create=True, new=create_mail):

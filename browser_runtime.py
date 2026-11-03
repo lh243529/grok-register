@@ -175,7 +175,7 @@ def _configure_browser_environment(options):
 def create_browser_options(browser_proxy="", extension_path=None):
     options = ChromiumOptions()
     options.auto_port()
-    options.set_timeouts(base=1)
+    options.set_timeouts(base=10, page_load=60, script=30)
     _configure_browser_environment(options)
     apply_browser_proxy_option(options, browser_proxy)
     effective_extension = _resolve_extension_path(extension_path)
