@@ -39,7 +39,7 @@ class CloudflareAdminCreateTests(unittest.TestCase):
             captured.update(kwargs)
             return DummyResponse({"address": "anon@example.com", "jwt": "default-jwt"})
 
-        with patch.object(app, "http_post", side_effect=fake_post):
+        with patch.object(mail_service, "http_post", side_effect=fake_post):
             address, jwt = app.cloudflare_create_temp_address("https://temp-mail.example.com")
 
         self.assertEqual(address, "anon@example.com")
@@ -63,7 +63,7 @@ class CloudflareAdminCreateTests(unittest.TestCase):
             return DummyResponse({"address": "adminuser@vitassk.com", "jwt": "address-jwt"})
 
         with patch.object(app, "generate_username", return_value="adminuser"), \
-                patch.object(app, "http_post", side_effect=fake_post):
+                patch.object(mail_service, "http_post", side_effect=fake_post):
             address, jwt = app.cloudflare_create_temp_address("https://temp-mail.ikun.day")
 
         self.assertEqual(address, "adminuser@vitassk.com")
@@ -91,7 +91,7 @@ class CloudflareAdminCreateTests(unittest.TestCase):
             captured.update(kwargs)
             return DummyResponse({"address": "anon@vitassk.com", "jwt": "anon-jwt"})
 
-        with patch.object(app, "http_post", side_effect=fake_post):
+        with patch.object(mail_service, "http_post", side_effect=fake_post):
             address, jwt = app.cloudflare_create_temp_address("https://temp-mail.ikun.day")
 
         self.assertEqual(address, "anon@vitassk.com")
@@ -108,7 +108,7 @@ class CloudflareAdminCreateTests(unittest.TestCase):
             captured.update(kwargs)
             return DummyResponse({"address": "debuguser@vitassk.com", "jwt": "debug-jwt"})
 
-        with patch.object(cf_mail_debug.requests, "post", side_effect=fake_post):
+        with patch.object(mail_service, "http_post", side_effect=fake_post):
             address, jwt = cf_mail_debug.create_address(
                 "https://temp-mail.ikun.day",
                 auth_mode="x-admin-auth",

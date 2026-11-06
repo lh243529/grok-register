@@ -281,7 +281,7 @@ class OutlookAuditTests(unittest.TestCase):
             Response(429, {}, headers={"Retry-After": "7"}),
             Response(200, {"ok": True}),
         ]
-        with patch.object(outlook_mail.requests, "request", side_effect=responses) as request, \
+        with patch.object(outlook_mail.requests.Session, "request", side_effect=responses) as request, \
              patch.object(outlook_mail, "_sleep_interruptibly") as sleep:
             result = outlook_mail._request_with_backoff("GET", "https://example.invalid", timeout=1)
         self.assertEqual(result.status_code, 200)

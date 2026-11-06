@@ -197,33 +197,36 @@ def _retry_after_seconds(response) -> Optional[float]:
 
 
 def _request_with_backoff(method: str, url: str, cancel_callback=None, **kwargs):
-    """Microsoft HTTP request with bounded concurrency and transient backoff."""
-    last_error = None
-    for attempt in range(MICROSOFT_HTTP_MAX_ATTEMPTS):
-        if cancel_callback and cancel_callback():
-            raise RuntimeError("任务已停止")
-        try:
-            with _MICROSOFT_HTTP_SEMAPHORE:
-                response = requests.request(method, url, **kwargs)
-        except (requests.Timeout, requests.ConnectionError) as exc:
-            last_error = exc
-            response = None
-        except requests.RequestException:
-            raise
+    """Direct Microsoft mailbox HTTP with bounded concurrency and transient backoff."""
+    kwargs.pop("proxies", None)
+    with requests.Session() as session:
+        session.trust_env = False
+        last_error = None
+        for attempt in range(MICROSOFT_HTTP_MAX_ATTEMPTS):
+            if cancel_callback and cancel_callback():
+                raise RuntimeError("任务已停止")
+            try:
+                with _MICROSOFT_HTTP_SEMAPHORE:
+                    response = session.request(method, url, **kwargs)
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                last_error = exc
+                response = None
+            except requests.RequestException:
+                raise
 
-        transient = response is None or response.status_code == 429 or response.status_code >= 500
-        if not transient or attempt + 1 >= MICROSOFT_HTTP_MAX_ATTEMPTS:
-            if response is not None:
-                return response
-            raise last_error or RuntimeError("Microsoft 请求失败")
+            transient = response is None or response.status_code == 429 or response.status_code >= 500
+            if not transient or attempt + 1 >= MICROSOFT_HTTP_MAX_ATTEMPTS:
+                if response is not None:
+                    return response
+                raise last_error or RuntimeError("Microsoft 请求失败")
 
-        explicit = _retry_after_seconds(response) if response is not None else None
-        if explicit is not None:
-            delay = explicit
-        else:
-            delay = min(1.0 * (2 ** attempt) + random.uniform(0.0, 0.75), MICROSOFT_HTTP_MAX_BACKOFF)
-        _sleep_interruptibly(delay, cancel_callback)
-    raise last_error or RuntimeError("Microsoft 请求失败")
+            explicit = _retry_after_seconds(response) if response is not None else None
+            if explicit is not None:
+                delay = explicit
+            else:
+                delay = min(1.0 * (2 ** attempt) + random.uniform(0.0, 0.75), MICROSOFT_HTTP_MAX_BACKOFF)
+            _sleep_interruptibly(delay, cancel_callback)
+        raise last_error or RuntimeError("Microsoft 请求失败")
 
 
 def _microsoft_oauth_error_message(label: str, status_code: int, data: dict) -> str:

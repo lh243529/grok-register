@@ -5,23 +5,16 @@
 import argparse
 import time
 
-from curl_cffi import requests
 from mail_service import CloudflareMailClient, extract_verification_code
 
 
 def create_address(api_base, auth_mode="none", api_key="", create_path="/api/new_address",
                    domain="", name="", timeout=20):
-    import mail_service as _mail_service
     client = CloudflareMailClient(
         api_base, auth_mode=auth_mode, api_key=api_key,
         create_path=create_path, timeout=timeout,
     )
-    original_requests = _mail_service.requests
-    _mail_service.requests = requests
-    try:
-        return client.create_address(domain=domain, name=name)
-    finally:
-        _mail_service.requests = original_requests
+    return client.create_address(domain=domain, name=name)
 
 
 def main():

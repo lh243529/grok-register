@@ -12,7 +12,7 @@ from email.parser import BytesParser
 from html.parser import HTMLParser
 from typing import Any, Dict, List, Optional, Tuple
 
-from curl_cffi import requests
+from curl_cffi import CurlOpt, requests
 from registration_flow import VerificationCodeUnavailable
 
 DUCKMAIL_API_BASE = "https://api.duckmail.sbs"
@@ -51,8 +51,9 @@ def _detail_retry_attempt(state, message_id, now=None):
 _OWN_NAMES = {'cloudmail_build_headers', 'cloudmail_preflight', 'cloudmail_wait_for_auth', 'cloudmail_get_email_and_token', 'get_messages', 'cloudflare_get_messages', 'get_yyds_api_key', 'yyds_generate_username', 'yyds_get_domains', 'yyds_get_email_and_token', 'yyds_get_oai_code', 'get_email_provider', 'cloudflare_get_domains', 'extract_verification_code', 'get_cloudflare_api_base', 'cloudflare_apply_auth_params', 'duckmail_get_oai_code', 'create_account', 'get_yyds_jwt', 'get_message_detail', 'yyds_create_account', 'get_duckmail_api_key', 'get_cloudflare_path', 'cloudflare_create_account', 'cloudflare_get_token', 'cloudflare_get_oai_code', 'get_cloudmail_public_token', 'generate_username', 'yyds_get_message_detail', 'cloudflare_next_default_domain', 'yyds_get_messages', 'yyds_get_token', 'get_domains', 'get_token', 'cloudflare_create_temp_address', 'get_cloudflare_api_key', 'get_cloudmail_path', 'get_cloudmail_api_base', 'cloudmail_get_oai_code', 'cloudflare_build_headers', 'cloudflare_is_admin_create_path', 'cloudmail_next_domain', 'cloudflare_get_message_detail', 'cloudmail_get_messages', 'get_user_agent', 'yyds_pick_domain', '_pick_list_payload', 'get_email_and_token', 'release_email_lease', 'get_oai_code', 'get_cloudflare_auth_mode', 'pick_domain'}
 
 
+# Mailbox HTTP helpers are local: runtime binding must never import proxy-aware ones.
 _RUNTIME_DEPENDENCIES = (
-    "http_get", "http_post", "sleep_with_cancel", "raise_if_cancelled",
+    "sleep_with_cancel", "raise_if_cancelled",
     "outlook_runtime", "domain_allocator",
 )
 
@@ -63,6 +64,28 @@ def bind_runtime(namespace):
     for name in _RUNTIME_DEPENDENCIES:
         if name in namespace:
             globals()[name] = namespace[name]
+
+
+def _mail_request(method, url, **kwargs):
+    """Send a mailbox request without application or environment proxies."""
+    # replay_safe belongs to the shared proxy-fallback transport, not this client.
+    for name in ("proxy", "proxies", "proxy_auth", "trust_env", "replay_safe"):
+        kwargs.pop(name, None)
+    curl_options = dict(kwargs.pop("curl_options", None) or {})
+    # curl_cffi 0.13 stores trust_env but libcurl can still read proxy env vars.
+    # An empty CURLOPT_PROXY explicitly disables that fallback for this session.
+    curl_options[CurlOpt.PROXY] = ""
+    kwargs.setdefault("timeout", 15)
+    with requests.Session(trust_env=False, curl_options=curl_options) as session:
+        return session.request(method, url, proxy=None, **kwargs)
+
+
+def http_get(url, **kwargs):
+    return _mail_request("GET", url, **kwargs)
+
+
+def http_post(url, **kwargs):
+    return _mail_request("POST", url, **kwargs)
 
 
 class _HTMLTextParser(HTMLParser):
@@ -577,22 +600,7 @@ def _cloudmail_token_warnings():
 
 
 def _cloudmail_network_label():
-    try:
-        from browser_runtime import get_configured_proxy
-        proxy = str(get_configured_proxy() or "").strip()
-    except Exception:
-        proxy = ""
-    if not proxy:
-        return "direct"
-    raw = proxy if "://" in proxy else "http://" + proxy
-    try:
-        parsed = urllib.parse.urlsplit(raw)
-        host = parsed.hostname or "unknown"
-        port = parsed.port
-        scheme = parsed.scheme or "proxy"
-        return f"{scheme}://{host}:{port}" if port else f"{scheme}://{host}"
-    except Exception:
-        return "proxy"
+    return "direct"
 
 
 def _cloudmail_auth_context():
@@ -644,7 +652,7 @@ def cloudmail_wait_for_auth(
     """Wait briefly for Cloud Mail's singleton Workers KV token to converge.
 
     Only 401/public-token failures are retried. The request keeps the current
-    network/proxy context; no proxy switching, token regeneration or auth
+    direct network context; no proxy switching, token regeneration or auth
     scheme fallback is attempted.
     """
     timeout = max(float(timeout or 0), 0.0)
@@ -695,7 +703,7 @@ def cloudmail_preflight(
     auth_timeout=CLOUDMAIL_AUTH_CONVERGENCE_SECONDS,
     defer_until_slot=True,
 ):
-    """Verify Cloud Mail auth in the same slot/network context as registration.
+    """Verify Cloud Mail auth over the dedicated direct mailbox transport.
 
     run_registration_common still calls this once for compatibility. That
     early call is deliberately deferred; registration_flow performs the real
@@ -703,7 +711,7 @@ def cloudmail_preflight(
     """
     if defer_until_slot:
         if log_callback:
-            log_callback("[Debug] Cloud Mail 鉴权预检已延后到当前注册 slot / Proxy Lease 建立后")
+            log_callback("[Debug] Cloud Mail 鉴权预检已延后到当前注册 slot 内，邮箱请求始终本地直连")
         return None
 
     for warning in _cloudmail_token_warnings():
@@ -1466,7 +1474,7 @@ class CloudflareMailClient:
         elif str(domain).strip():
             payload["domain"] = str(domain).strip()
         headers = self.build_auth_headers(content_type=True)
-        response = requests.post(self.api_base + self.create_path, json=payload, headers=headers, params=self.build_auth_params(), timeout=self.timeout)
+        response = http_post(self.api_base + self.create_path, json=payload, headers=headers, params=self.build_auth_params(), timeout=self.timeout)
         response.raise_for_status()
         data, raw = self.json_or_text(response)
         if not data:
@@ -1478,7 +1486,7 @@ class CloudflareMailClient:
         return address, jwt
 
     def fetch_box(self, jwt, path, params):
-        response = requests.get(
+        response = http_get(
             self.api_base + path,
             params=params,
             headers={"Authorization": "Bearer " + str(jwt)},
@@ -1503,7 +1511,7 @@ class CloudflareMailClient:
     def get_detail(self, jwt, mail_id):
         for path in ("/api/mail/%s" % mail_id, "/api/mails/%s" % mail_id):
             try:
-                response = requests.get(
+                response = http_get(
                     self.api_base + path,
                     headers={"Authorization": "Bearer " + str(jwt)},
                     timeout=self.timeout,
